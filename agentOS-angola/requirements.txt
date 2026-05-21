@@ -18,6 +18,9 @@ anthropic==0.40.0
 google-cloud-firestore==2.19.0
 google-auth==2.37.0
 
+# Firebase Admin SDK — JWT verification
+firebase-admin==6.6.0
+
 # Environment & config
 python-dotenv==1.0.1
 pydantic==2.10.3

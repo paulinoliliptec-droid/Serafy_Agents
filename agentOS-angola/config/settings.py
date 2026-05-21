@@ -41,8 +41,18 @@ class Settings(BaseSettings):
     # GCP / Firestore
     gcp_project_id: str = ""
     firestore_collection: str = "agentos_checkpoints"
-    # Set to "firestore" in production; defaults to "memory" for local dev
-    checkpointer_backend: str = "memory"
+    checkpointer_backend: str = "memory"  # "memory" | "firestore"
+
+    # Firebase Authentication
+    firebase_project_id: str = ""
+    # Path to a service-account JSON — leave empty on Cloud Run (uses ADC)
+    firebase_credentials_path: str = ""
+
+    # WhatsApp Business API
+    whatsapp_verify_token: str = "change-me-verify-token"
+    whatsapp_app_secret: str = ""   # used to verify X-Hub-Signature-256
+    whatsapp_api_token: str = ""    # permanent system user token from Meta
+    whatsapp_default_tenant: str = "default"  # tenant_id for WA-originated sessions
 
     @property
     def cors_origins(self) -> list[str]:
