@@ -1,0 +1,31 @@
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# LangGraph & LangChain
+langgraph==0.2.55
+langchain==0.3.9
+langchain-core==0.3.21
+langchain-openai==0.2.11
+langchain-anthropic==0.3.0
+langchain-community==0.3.9
+
+# LLM providers
+openai==1.57.0
+anthropic==0.40.0
+
+# Environment & config
+python-dotenv==1.0.1
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# HTTP client
+httpx==0.27.2
+
+# Logging & observability
+structlog==24.4.0
+langsmith==0.1.147
+
+# Utilities
+tenacity==9.0.0
+python-multipart==0.0.20
