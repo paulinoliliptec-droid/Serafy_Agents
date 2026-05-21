@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     # Path to a service-account JSON — leave empty on Cloud Run (uses ADC)
     firebase_credentials_path: str = ""
 
+    # Kiesse Legal API (Dra. Kiesse)
+    kiesse_api_url: str = ""
+    kiesse_api_key: str = ""
+    kiesse_timeout: float = 30.0
+
+    # Gemini — fallback legal model
+    gemini_api_key: str = ""
+    gemini_legal_model: str = "gemini-1.5-pro"
+
     # WhatsApp Business API
     whatsapp_verify_token: str = "change-me-verify-token"
     whatsapp_app_secret: str = ""   # used to verify X-Hub-Signature-256
