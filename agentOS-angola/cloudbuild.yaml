@@ -1,0 +1,94 @@
+################################################################################
+# Cloud Build — agentOS-angola CI/CD pipeline
+#
+# Trigger via:
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions _REGION=europe-west1
+#
+# Or connect this repo in Cloud Build → Triggers for push-to-main automation.
+################################################################################
+
+substitutions:
+  _REGION: europe-west1
+  _SERVICE: agentOS-angola
+  _AR_REPO: agentOS-angola         # Artifact Registry repository name
+  _IMAGE: agentOS-angola
+  _MIN_INSTANCES: "1"
+  _MAX_INSTANCES: "10"
+  _MEMORY: 1Gi
+  _CPU: "1"
+  _CONCURRENCY: "80"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  substitution_option: ALLOW_LOOSE
+
+steps:
+
+  # ── 1. Build ────────────────────────────────────────────────────────────────
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=Dockerfile
+      - --tag=$_REGION-docker.pkg.dev/$PROJECT_ID/$_AR_REPO/$_IMAGE:$COMMIT_SHA
+      - --tag=$_REGION-docker.pkg.dev/$PROJECT_ID/$_AR_REPO/$_IMAGE:latest
+      # Pull latest for layer cache (fails silently on first build)
+      - --cache-from=$_REGION-docker.pkg.dev/$PROJECT_ID/$_AR_REPO/$_IMAGE:latest
+      - --build-arg=BUILDKIT_INLINE_CACHE=1
+      - .
+    env:
+      - DOCKER_BUILDKIT=1
+
+  # ── 2. Push ─────────────────────────────────────────────────────────────────
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    waitFor: [build]
+    args:
+      - push
+      - --all-tags
+      - $_REGION-docker.pkg.dev/$PROJECT_ID/$_AR_REPO/$_IMAGE
+
+  # ── 3. Deploy to Cloud Run ───────────────────────────────────────────────────
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: [push]
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - $_SERVICE
+      - --image=$_REGION-docker.pkg.dev/$PROJECT_ID/$_AR_REPO/$_IMAGE:$COMMIT_SHA
+      - --region=$_REGION
+      - --platform=managed
+      - --allow-unauthenticated   # app-level auth is handled by Firebase JWT
+      - --port=8080
+      - --min-instances=$_MIN_INSTANCES
+      - --max-instances=$_MAX_INSTANCES
+      - --concurrency=$_CONCURRENCY
+      - --memory=$_MEMORY
+      - --cpu=$_CPU
+      - --timeout=60
+      # ── Non-sensitive env vars ──────────────────────────────────────────────
+      - >-
+        --set-env-vars=APP_ENV=production,
+        LOG_LEVEL=INFO,
+        GCP_PROJECT_ID=$PROJECT_ID,
+        CHECKPOINTER_BACKEND=firestore,
+        FIRESTORE_COLLECTION=agentos_checkpoints,
+        FIREBASE_PROJECT_ID=$PROJECT_ID,
+        LANGCHAIN_TRACING_V2=false
+      # ── Secrets from Secret Manager (KEY=SECRET_NAME:VERSION) ───────────────
+      - >-
+        --set-secrets=OPENAI_API_KEY=openai-api-key:latest,
+        WHATSAPP_VERIFY_TOKEN=whatsapp-verify-token:latest,
+        WHATSAPP_APP_SECRET=whatsapp-app-secret:latest,
+        WHATSAPP_API_TOKEN=whatsapp-api-token:latest,
+        API_SECRET_KEY=api-secret-key:latest
+      # ── Service account with Firestore + Secret Manager access ───────────────
+      - --service-account=agentOS-angola-sa@$PROJECT_ID.iam.gserviceaccount.com
+
+# Export built images to Artifact Registry
+images:
+  - $_REGION-docker.pkg.dev/$PROJECT_ID/$_AR_REPO/$_IMAGE:$COMMIT_SHA
+  - $_REGION-docker.pkg.dev/$PROJECT_ID/$_AR_REPO/$_IMAGE:latest
