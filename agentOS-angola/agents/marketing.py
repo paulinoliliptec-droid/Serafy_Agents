@@ -6,16 +6,17 @@ from agents.state import AgentState
 from config import settings
 from tools import search_knowledge_base, log_interaction
 
-BASE_PROMPT = """És o Agente Comercial do agentOS-angola.
+BASE_PROMPT = """És o Agente de Marketing do agentOS-angola.
 
-Tratas de todas as questões de vendas: preços, propostas, informação sobre produtos,
-oportunidades de parceria e procurement para empresas angolanas.
+Apoias equipas de marketing angolanas em campanhas, comunicação de marca,
+publicidade digital, criação de conteúdo e estratégia de marketing para o mercado angolano.
 
 Directrizes:
-- Pesquisa na base de conhecimento antes de citar preços ou disponibilidade.
-- Apresenta ofertas em Kwanza (AOA) quando aplicável, destacando valor para o mercado angolano.
-- Não inventes preços ou funcionalidades; se não tiveres a informação, diz-o e oferece contacto comercial.
-- Regista a interacção no final com log_interaction.
+- Considera o contexto cultural e económico angolano nas sugestões.
+- Pesquisa a base de conhecimento para referências de mercado e campanhas anteriores.
+- Sugere canais relevantes para Angola: WhatsApp, Facebook, rádio local, TV, outdoor.
+- Mantém o tom de voz da marca em todas as sugestões.
+- Regista a interacção com log_interaction.
 - Responde no idioma do cliente (Português ou Inglês).
 """
 
@@ -26,9 +27,9 @@ def _get_graph():
     global _graph
     if _graph is None:
         llm = ChatOpenAI(
-            model=settings.commercial_model,
+            model=settings.marketing_model,
             api_key=settings.openai_api_key,
-            temperature=0.4,
+            temperature=0.7,
         )
         _graph = create_react_agent(
             model=llm,
@@ -37,7 +38,7 @@ def _get_graph():
     return _graph
 
 
-def commercial_node(state: AgentState) -> dict:
+def marketing_node(state: AgentState) -> dict:
     memory = state.get("memory", {})
     system_content = BASE_PROMPT
     if memory.get("summary"):

@@ -10,14 +10,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # LLM
+    # LLM providers
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
 
+    # Model per agent
     orchestrator_model: str = "gpt-4o"
     support_model: str = "gpt-4o-mini"
     commercial_model: str = "gpt-4o-mini"
     legal_model: str = "gpt-4o"
+    hr_model: str = "gpt-4o-mini"
+    financial_model: str = "gpt-4o"
+    marketing_model: str = "gpt-4o-mini"
 
     # LangSmith
     langchain_tracing_v2: bool = False
@@ -33,6 +37,12 @@ class Settings(BaseSettings):
     # Security
     api_secret_key: str = "change-me"
     allowed_origins: str = "http://localhost:3000"
+
+    # GCP / Firestore
+    gcp_project_id: str = ""
+    firestore_collection: str = "agentos_checkpoints"
+    # Set to "firestore" in production; defaults to "memory" for local dev
+    checkpointer_backend: str = "memory"
 
     @property
     def cors_origins(self) -> list[str]:

@@ -4,18 +4,20 @@ from langgraph.prebuilt import create_react_agent
 
 from agents.state import AgentState
 from config import settings
-from tools import search_knowledge_base, log_interaction
+from tools import search_knowledge_base, escalate_to_human, log_interaction
 
-BASE_PROMPT = """És o Agente Comercial do agentOS-angola.
+BASE_PROMPT = """És o Agente Financeiro do agentOS-angola.
 
-Tratas de todas as questões de vendas: preços, propostas, informação sobre produtos,
-oportunidades de parceria e procurement para empresas angolanas.
+Apoias empresas angolanas em questões financeiras:
+facturas, pagamentos, tesouraria, contabilidade, impostos (IRT, IPU, IS),
+relatórios financeiros e conformidade com o AGT (Administração Geral Tributária).
 
 Directrizes:
-- Pesquisa na base de conhecimento antes de citar preços ou disponibilidade.
-- Apresenta ofertas em Kwanza (AOA) quando aplicável, destacando valor para o mercado angolano.
-- Não inventes preços ou funcionalidades; se não tiveres a informação, diz-o e oferece contacto comercial.
-- Regista a interacção no final com log_interaction.
+- Pesquisa a base de conhecimento para valores fiscais e prazos actualizados.
+- Para análises financeiras complexas ou irregularidades, usa escalate_to_human.
+- Trabalha com valores em Kwanza (AOA) por defeito; indica conversões para USD se pedido.
+- Nunca dês aconselhamento de investimento definitivo; enquadra como orientação geral.
+- Regista a interacção com log_interaction.
 - Responde no idioma do cliente (Português ou Inglês).
 """
 
@@ -26,18 +28,18 @@ def _get_graph():
     global _graph
     if _graph is None:
         llm = ChatOpenAI(
-            model=settings.commercial_model,
+            model=settings.financial_model,
             api_key=settings.openai_api_key,
-            temperature=0.4,
+            temperature=0.1,
         )
         _graph = create_react_agent(
             model=llm,
-            tools=[search_knowledge_base, log_interaction],
+            tools=[search_knowledge_base, escalate_to_human, log_interaction],
         )
     return _graph
 
 
-def commercial_node(state: AgentState) -> dict:
+def financial_node(state: AgentState) -> dict:
     memory = state.get("memory", {})
     system_content = BASE_PROMPT
     if memory.get("summary"):
