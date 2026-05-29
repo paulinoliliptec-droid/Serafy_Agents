@@ -10,9 +10,9 @@
 
 substitutions:
   _REGION: europe-west1
-  _SERVICE: agentOS-angola
-  _AR_REPO: agentOS-angola         # Artifact Registry repository name
-  _IMAGE: agentOS-angola
+  _SERVICE: agentos-angola
+  _AR_REPO: agentos-angola
+  _IMAGE: agentos-angola
   _MIN_INSTANCES: "1"
   _MAX_INSTANCES: "10"
   _MEMORY: 1Gi

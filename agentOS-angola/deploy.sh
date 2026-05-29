@@ -15,10 +15,10 @@ set -euo pipefail
 
 # ── Configuração ──────────────────────────────────────────────────────────────
 REGION="europe-west1"
-SERVICE="agentOS-angola"
-AR_REPO="agentOS-angola"
-IMAGE="agentOS-angola"
-SA_NAME="agentOS-angola-sa"
+SERVICE="agentos-angola"
+AR_REPO="agentos-angola"
+IMAGE="agentos-angola"
+SA_NAME="agentos-angola-sa"
 DEPLOY_ONLY=false
 
 while [[ $# -gt 0 ]]; do
@@ -104,18 +104,24 @@ if [[ "$DEPLOY_ONLY" == false ]]; then
     gcloud projects add-iam-policy-binding "$PROJECT_ID" \
       --member="serviceAccount:$SA_EMAIL" \
       --role="$ROLE" \
+      --condition=None \
       --quiet &>/dev/null
     echo "    IAM: $ROLE → $SA_EMAIL"
   done
 
-  # Permitir que o Cloud Build faça deploy no Cloud Run
+  # Permitir que o Cloud Build faça deploy no Cloud Run (só se a SA existir)
   CB_SA="${PROJECT_ID}@cloudbuild.gserviceaccount.com"
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:${CB_SA}" \
-    --role="roles/run.admin" --quiet &>/dev/null
-  gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
-    --member="serviceAccount:${CB_SA}" \
-    --role="roles/iam.serviceAccountUser" --quiet &>/dev/null
+  if gcloud iam service-accounts describe "$CB_SA" --quiet &>/dev/null 2>&1; then
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+      --member="serviceAccount:${CB_SA}" \
+      --role="roles/run.admin" --condition=None --quiet &>/dev/null
+    gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
+      --member="serviceAccount:${CB_SA}" \
+      --role="roles/iam.serviceAccountUser" --quiet &>/dev/null
+    echo "    IAM: Cloud Build SA configurada"
+  else
+    echo "    AVISO: Cloud Build SA ainda não existe — configurar após primeiro build"
+  fi
 
   # ── 4. Secrets no Secret Manager ────────────────────────────────────────────
   echo ""
