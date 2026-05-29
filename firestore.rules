@@ -1,0 +1,64 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Tenant data — managed by the admin panel ──────────────────────────────
+    match /tenants/{tenantId} {
+      allow read, write: if request.auth != null && _isAdmin();
+
+      match /agents/{agentId}    { allow read, write: if request.auth != null && _isAdmin(); }
+      match /api_keys/{keyId}    { allow read, write: if request.auth != null && _isAdmin(); }
+      match /billing/{month}     { allow read, write: if request.auth != null && _isAdmin(); }
+    }
+
+    // ── Analytics (admin panel dashboard) ────────────────────────────────────
+    match /analytics/{docId} {
+      allow read: if request.auth != null && _isAdmin();
+      allow write: if false; // written by Cloud Functions / backend only
+    }
+
+    // ── Ops monitoring (founder dashboard in landing_page /admin) ─────────────
+
+    // System status — written by Cloud Run health checks, read by founder dashboard
+    match /system_status/{docId} {
+      allow read: if request.auth != null && _isAdmin();
+      allow write: if false; // Cloud Run service account only
+    }
+
+    // Active conversations — written by Cloud Run, read by founder dashboard
+    match /conversations/{sessionId} {
+      allow read: if request.auth != null && _isAdmin();
+      allow write: if false; // Cloud Run service account only
+    }
+
+    // Agent invocation logs — written by Cloud Run, read by founder dashboard
+    match /agent_logs/{logId} {
+      allow read: if request.auth != null && _isAdmin();
+      allow write: if false; // Cloud Run service account only
+    }
+
+    // Daily metrics — written by Cloud Run, read by founder dashboard
+    match /metrics/{docId} {
+      allow read: if request.auth != null && _isAdmin();
+      allow write: if false; // Cloud Run service account only
+    }
+
+    // ── Legal billing audit log ───────────────────────────────────────────────
+    match /legal_billing/{logId} {
+      allow read: if request.auth != null && _isAdmin();
+      allow write: if false; // Cloud Run service account only
+    }
+
+    // ── LangGraph checkpoints ─────────────────────────────────────────────────
+    match /agentos_checkpoints/{document=**} {
+      allow read, write: if false; // Cloud Run service account only (ADC)
+    }
+
+    // ── Helper: admin check ───────────────────────────────────────────────────
+    // Set custom claim: auth.setCustomUserClaims(uid, { admin: true })
+    function _isAdmin() {
+      return request.auth.token.admin == true;
+    }
+  }
+}

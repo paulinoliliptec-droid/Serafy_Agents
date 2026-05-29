@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
+import time
 import uuid
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, Any, Optional
 
 import httpx
 import structlog
@@ -24,6 +27,121 @@ from .schemas import (
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
+
+# ── Lazy Firestore client (reused across requests within the same instance) ──
+
+_firestore: Any = None
+
+
+def _get_firestore() -> Any:
+    global _firestore
+    if _firestore is None and settings.gcp_project_id:
+        try:
+            from google.cloud import firestore
+            _firestore = firestore.AsyncClient(project=settings.gcp_project_id)
+        except ImportError:
+            pass
+    return _firestore
+
+
+# ── Firestore write helpers (all fire-and-forget) ────────────────────────────
+
+async def _persist_conversation(
+    session_id: str,
+    tenant_id: str,
+    user_id: str,
+    channel: str,
+    last_message: str,
+    agent_used: str,
+    status: str = "active",
+) -> None:
+    db = _get_firestore()
+    if db is None:
+        return
+    try:
+        from google.cloud import firestore
+        ref = db.collection("conversations").document(session_id)
+        doc = await ref.get()
+        if doc.exists:
+            await ref.update({
+                "last_message": last_message[:200],
+                "last_agent": agent_used,
+                "status": status,
+                "message_count": firestore.Increment(1),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            })
+        else:
+            await ref.set({
+                "channel": channel,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "last_message": last_message[:200],
+                "last_agent": agent_used,
+                "status": status,
+                "message_count": 1,
+                "started_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            })
+    except Exception as exc:
+        logger.warning("persist_conversation_failed", error=str(exc))
+
+
+async def _persist_agent_log(
+    session_id: str,
+    tenant_id: str,
+    agent: str,
+    latency_ms: int,
+) -> None:
+    db = _get_firestore()
+    if db is None:
+        return
+    try:
+        from google.cloud import firestore
+        await db.collection("agent_logs").add({
+            "session_id": session_id,
+            "tenant_id": tenant_id,
+            "agent": agent,
+            "latency_ms": latency_ms,
+            "timestamp": firestore.SERVER_TIMESTAMP,
+        })
+    except Exception as exc:
+        logger.warning("persist_agent_log_failed", error=str(exc))
+
+
+async def _update_daily_metrics(agent_used: str, latency_ms: int) -> None:
+    db = _get_firestore()
+    if db is None:
+        return
+    try:
+        from google.cloud import firestore
+        today = datetime.now().strftime("%Y-%m-%d")
+        ref = db.collection("metrics").document("today")
+        await ref.set({
+            "date": today,
+            "total_messages": firestore.Increment(1),
+            "total_latency_ms": firestore.Increment(latency_ms),
+            f"agent_breakdown.{agent_used}": firestore.Increment(1),
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+    except Exception as exc:
+        logger.warning("update_daily_metrics_failed", error=str(exc))
+
+
+async def _update_system_status() -> None:
+    db = _get_firestore()
+    if db is None:
+        return
+    try:
+        from google.cloud import firestore
+        await db.collection("system_status").document("current").set({
+            "cloud_run_healthy": True,
+            "openai_active": bool(settings.openai_api_key),
+            "gemini_active": bool(settings.gemini_api_key),
+            "whatsapp_configured": bool(settings.whatsapp_api_token),
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+    except Exception as exc:
+        logger.warning("update_system_status_failed", error=str(exc))
 
 # ── Graph + checkpointer (initialised once at startup) ───────────────────────
 
@@ -55,9 +173,9 @@ async def _run_graph(
     user_id: str,
     agent: str = "auto",
     memory: dict | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, int]:
     """
-    Invoke the agent graph and return (reply, agent_used).
+    Invoke the agent graph and return (reply, agent_used, latency_ms).
     Raises RuntimeError on graph failure.
     """
     initial_state: AgentState = {
@@ -72,7 +190,9 @@ async def _run_graph(
             "tenant_id": tenant_id,
         }
     }
+    t0 = time.monotonic()
     result: AgentState = await _graph.ainvoke(initial_state, config=invoke_config)
+    latency_ms = int((time.monotonic() - t0) * 1000)
 
     agent_used = result.get("next_agent") or agent
     if not agent_used or agent_used == "end":
@@ -80,7 +200,7 @@ async def _run_graph(
 
     last_msg = result["messages"][-1]
     reply = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
-    return reply, agent_used
+    return reply, agent_used, latency_ms
 
 
 # ── GET /health ───────────────────────────────────────────────────────────────
@@ -88,6 +208,7 @@ async def _run_graph(
 @router.get("/health", response_model=HealthResponse, tags=["infra"])
 async def health_check() -> HealthResponse:
     """Healthcheck endpoint — used by Cloud Run readiness and liveness probes."""
+    asyncio.create_task(_update_system_status())
     return HealthResponse(
         environment=settings.app_env,
         checkpointer=type(_checkpointer).__name__,
@@ -121,7 +242,7 @@ async def chat(
     )
 
     try:
-        reply, agent_used = await _run_graph(
+        reply, agent_used, latency_ms = await _run_graph(
             message=request.message,
             session_id=request.session_id,
             tenant_id=effective_tenant,
@@ -136,7 +257,24 @@ async def chat(
             detail="Erro interno do agente. Tente novamente.",
         )
 
-    logger.info("chat_response", uid=user.uid, agent_used=agent_used)
+    logger.info("chat_response", uid=user.uid, agent_used=agent_used, latency_ms=latency_ms)
+
+    asyncio.create_task(_persist_conversation(
+        session_id=request.session_id,
+        tenant_id=effective_tenant,
+        user_id=user.uid,
+        channel="chat",
+        last_message=request.message,
+        agent_used=agent_used,
+    ))
+    asyncio.create_task(_persist_agent_log(
+        session_id=request.session_id,
+        tenant_id=effective_tenant,
+        agent=agent_used,
+        latency_ms=latency_ms,
+    ))
+    asyncio.create_task(_update_daily_metrics(agent_used, latency_ms))
+
     return ChatResponse(
         session_id=request.session_id,
         tenant_id=effective_tenant,
@@ -263,7 +401,7 @@ async def whatsapp_webhook(request: Request) -> WAWebhookResponse:
                 )
 
                 try:
-                    reply, agent_used = await _run_graph(
+                    reply, agent_used, latency_ms = await _run_graph(
                         message=message_text,
                         session_id=session_id,
                         tenant_id=tenant_id,
@@ -272,7 +410,23 @@ async def whatsapp_webhook(request: Request) -> WAWebhookResponse:
                         memory={"channel": "whatsapp"},
                     )
                     await _send_whatsapp_reply(phone_number_id, user_id, reply)
-                    logger.info("whatsapp_processed", from_=user_id, agent_used=agent_used)
+                    logger.info("whatsapp_processed", from_=user_id, agent_used=agent_used, latency_ms=latency_ms)
+
+                    asyncio.create_task(_persist_conversation(
+                        session_id=session_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        channel="whatsapp",
+                        last_message=message_text,
+                        agent_used=agent_used,
+                    ))
+                    asyncio.create_task(_persist_agent_log(
+                        session_id=session_id,
+                        tenant_id=tenant_id,
+                        agent=agent_used,
+                        latency_ms=latency_ms,
+                    ))
+                    asyncio.create_task(_update_daily_metrics(agent_used, latency_ms))
                     processed += 1
                 except Exception as exc:
                     err = f"Erro ao processar mensagem de {user_id}: {exc}"
